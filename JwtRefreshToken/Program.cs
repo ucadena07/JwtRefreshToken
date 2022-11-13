@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Internal;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using System.IdentityModel.Tokens.Jwt;
 using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -44,6 +45,15 @@ builder.Services.AddAuthentication(it =>
         ValidateIssuerSigningKey = true,
         ValidateLifetime = true,
         ClockSkew = TimeSpan.Zero
+    };
+    it.Events = new JwtBearerEvents();
+    it.Events.OnTokenValidated = async (context) =>
+    {
+        var ipAddress = context.Request.HttpContext.Connection.RemoteIpAddress.ToString();
+        var jwtService = context.Request.HttpContext.RequestServices.GetService<IJwtService>();
+        var jwtToken = context.SecurityToken as JwtSecurityToken;
+        if (!await jwtService.IsTokenValid(jwtToken.RawData, ipAddress))
+            context.Fail("Invalid token details");
     };
 });
 

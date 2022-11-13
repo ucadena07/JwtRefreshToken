@@ -4,7 +4,9 @@ using JwtRefreshToken.Models;
 using JwtRefreshToken.Services.IServices;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using System.IdentityModel.Tokens.Jwt;
 using System.Net;
+using System.Security.Claims;
 
 namespace JwtRefreshToken.Controllers
 {
@@ -30,8 +32,15 @@ namespace JwtRefreshToken.Controllers
         [ProducesResponseType(StatusCodes.Status401Unauthorized)]
         public async Task<ActionResult<APIResponse>> AuthToken([FromBody] AuthRequest request)
         {
-            var token = await _jwtService.GetTokenAsync(request);
-            if(token is null)
+            if (!ModelState.IsValid)
+            {
+                _response.StatusCode = HttpStatusCode.BadRequest;
+                _response.ErrorMessages.Add("Username and password must be provided");
+                return BadRequest(_response);
+            }
+
+            var authoResponse = await _jwtService.GetTokenAsync(request, HttpContext.Connection.RemoteIpAddress.ToString());
+            if(authoResponse is null)
             {
                 
                 _response.StatusCode = HttpStatusCode.Unauthorized;
@@ -40,9 +49,72 @@ namespace JwtRefreshToken.Controllers
             }
             _response.StatusCode = HttpStatusCode.OK;
             _response.IsSuccess = true;
-            _response.Result = token;
+            _response.Result = authoResponse;
             return Ok(_response);
 
+        }
+
+        [HttpPost("RefreshToken")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        public async Task<ActionResult<APIResponse>> RefreshToken([FromBody] RefreshTokenRequest request)
+        {
+            if (!ModelState.IsValid)
+            {
+                _response.StatusCode = HttpStatusCode.BadRequest;
+                _response.ErrorMessages.Add("Tokens must be provided");
+                _response.IsSuccess = false;
+                return BadRequest(_response);
+            }
+            string ipAddress = HttpContext.Connection.RemoteIpAddress.ToString();
+
+            var token = GetJwtToken(request.ExpiredToken);
+
+            var userRefreshToken = _db.UserRefreshTokens.FirstOrDefault(it => it.IsInvalidated == false
+            && it.Token == request.ExpiredToken &&
+            it.RefreshToken == request.RefreshToken
+            && it.IpAddress == ipAddress);
+
+            AuthResponse authReponse = ValidateDetails(token, userRefreshToken);
+            if (!authReponse.IsSuccess)
+            {
+                _response.IsSuccess = false;
+                _response.StatusCode = HttpStatusCode.BadRequest;
+                _response.ErrorMessages.Add(authReponse.Reason.ToString());
+                return BadRequest(_response);
+            }
+
+            userRefreshToken.IsInvalidated = true;
+            _db.UserRefreshTokens.Update(userRefreshToken);
+            await _db.SaveChangesAsync();
+
+
+            var userName = token.Claims.FirstOrDefault(it => it.Type == JwtRegisteredClaimNames.NameId).Value;
+            var dbReponse = await _jwtService.GetRefreshTokenAsync(ipAddress, userRefreshToken.UserId,userName);
+
+            _response.Result = dbReponse;
+
+
+            return _response;
+        }
+
+        private AuthResponse ValidateDetails(JwtSecurityToken token, UserRefreshToken userRefreshToken)
+        {
+            if(userRefreshToken is null)
+                return new AuthResponse { IsSuccess= false, Reason = "Invalid Token Details" };
+            if(token.ValidTo > DateTime.UtcNow)
+                return new AuthResponse { IsSuccess = false, Reason = "Token not expired" };
+            if(!userRefreshToken.IsActive)
+                return new AuthResponse { IsSuccess = false, Reason = "Refresh token expired" };
+            return new AuthResponse { IsSuccess = true };
+
+        }
+
+        private JwtSecurityToken GetJwtToken(string expiredToken)
+        {
+            JwtSecurityTokenHandler tokenHandler = new JwtSecurityTokenHandler();
+            return tokenHandler.ReadJwtToken(expiredToken);
         }
 
         //[HttpPost("Register")]

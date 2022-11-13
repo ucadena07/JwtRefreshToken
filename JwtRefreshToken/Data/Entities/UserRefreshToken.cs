@@ -15,7 +15,7 @@ namespace JwtRefreshToken.Data.Entities
         public DateTime ExpirationDate { get; set; }
 
         [NotMapped]
-        public bool IsActive { get { return ExpirationDate < DateTime.UtcNow; } }
+        public bool IsActive { get { return ExpirationDate > DateTime.UtcNow; } }
         public string IpAddress { get; set; }
         public bool IsInvalidated { get; set; }
 
