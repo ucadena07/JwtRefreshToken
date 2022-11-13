@@ -11,5 +11,6 @@ namespace JwtRefreshToken.Data.Entities
 
         public byte[] PasswordHash { get; set; }
         public byte[] PasswordSalt { get; set; }
+        public List<UserRefreshToken> UserRefreshTokens { get; set; }
     }
 }
